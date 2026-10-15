@@ -1,239 +1,142 @@
-import streamlit as st
-st.markdown(
-    """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 import io
-from io import BytesIO
 import os
 import zipfile
-from PIL import Image, ImageEnhance, ImageOps
 import streamlit as st
-import streamlit.components.v1 as components
+from PIL import Image, ImageEnhance, ImageOps
+import pillow_heif
 
-# Intentamos importar pillow_heif por si suben fotos nativas de iPhone (.heic)
-try:
-    import pillow_heif
-    pillow_heif.register_heif_opener()
-except ImportError:
-    pass
+# Registrar el decodificador de HEIC/HEIF de iPhone
+pillow_heif.register_heif_opener()
 
 st.set_page_config(
-    page_title="Optimizador Inmobiliario - SaaS",
-    layout="centered"
+    page_title="SaaS Inmobiliario - Optimización de Imágenes",
+    page_icon="🏠",
+    layout="wide"
 )
 
-# --- CSS Y JAVASCRIPT PARA ELIMINAR TOTALMENTE INSIGNIAS Y MENÚS EXTERNOS ---
-hide_streamlit_style = """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    div[data-testid="stToolbar"] {display: none !important;}
-    div[data-testid="stDecoration"] {display: none !important;}
-    div[data-testid="stStatusWidget"] {visibility: hidden !important; display: none !important;}
-    .stAppDeployButton {display: none !important;}
-    div[data-testid="stConnectionStatus"] {display: none !important;}
-    footer, .viewerBadge_container__1QSob, div.viewerBadge_link__1S137 {
-        display: none !important; 
-        visibility: hidden !important; 
-        pointer-events: none !important;
-    }
-    </style>
-    
-    <script>
-    // Script para eliminar dinámicamente cualquier insignia flotante de Streamlit
-    const removeBadge = () => {
-        const badges = window.parent.document.querySelectorAll('.viewerBadge_container__1QSob, .stAppDeployButton, footer');
-        badges.forEach(el => el.remove());
-    };
-    setInterval(removeBadge, 500);
-    </script>
-"""
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.title("🏠 Procesador Profesional de Imágenes Inmobiliarias")
+st.write("Sube tus lotes de fotos para redimensionar, mejorar luz, renombrar para SEO y colocar tu logo en segundos.")
 
-st.title("🏡 Optimizador Inmobiliario por Lotes")
-st.write("Sube el lote de fotos de tu inmueble, ajusta la posición lateral, la opacidad y el color del logo.")
+st.sidebar.header("⚙️ Configuración del Lote")
 
-# 1. Subida de archivos múltiples (Soporte amplio para formatos de móvil y PC)
-uploaded_images = st.file_uploader(
-    "1. Sube el lote de fotos del piso (JPG, PNG, WEBP, HEIC)",
-    type=["jpg", "jpeg", "png", "webp", "heic", "JPG", "JPEG", "PNG", "WEBP", "HEIC"],
+# 1. Configuración de Marca de Agua
+st.sidebar.subheader("1. Marca de Agua / Logo")
+watermark_file = st.sidebar.file_uploader("Subir Logo (PNG transparente recomendado)", type=["png", "jpg", "jpeg"])
+wm_position = st.sidebar.selectbox("Posición del Logo", ["Centro", "Inferior Derecha", "Inferior Izquierda", "Superior Derecha", "Superior Izquierda"])
+wm_opacity = st.sidebar.slider("Opacidad del Logo (%)", 10, 100, 80)
+
+# 2. Configuración SEO
+st.sidebar.subheader("2. Renombrado SEO")
+seo_prefix = st.sidebar.text_input("Texto SEO (ej: piso-en-venta-madrid)", value="inmueble-oferta")
+
+# 3. Mejora de Luz / Filtro Inmobiliario
+st.sidebar.subheader("3. Realce de Luz y Color")
+enable_enhancement = st.sidebar.checkbox("Activar Filtro Inmobiliario (Brillo/Luz)", value=True)
+brightness_factor = st.sidebar.slider("Brillo / Luz", 0.8, 1.8, 1.25)
+contrast_factor = st.sidebar.slider("Contraste", 0.8, 1.5, 1.1)
+
+# 4. Redimensionado y Calidad
+st.sidebar.subheader("4. Tamaño y Calidad")
+max_width = st.sidebar.number_input("Ancho Máximo (px)", value=1920)
+max_height = st.sidebar.number_input("Alto Máximo (px)", value=1080)
+jpeg_quality = st.sidebar.slider("Calidad JPEG (%)", 50, 95, 82)
+
+# Carga de imágenes principales
+uploaded_files = st.file_uploader(
+    "Selecciona o arrastra las fotos del inmueble (soporta JPG, PNG, HEIC)",
+    type=["jpg", "jpeg", "png", "heic", "heif"],
     accept_multiple_files=True
 )
 
-uploaded_logo = st.file_uploader(
-    "2. Sube el logo de la inmobiliaria (PNG, JPG)",
-    type=["png", "PNG", "jpg", "JPG", "jpeg", "JPEG"]
-)
+def apply_watermark(base_img, wm_img, position, opacity_pct):
+    base_img = base_img.convert("RGBA")
+    wm_img = wm_img.convert("RGBA")
 
-# Configuración del logo
-st.subheader("⚙️ Configuración del Logo / Marca de Agua")
-col1, col2, col3 = st.columns(3)
+    # Escalar la marca de agua a máximo 20% del ancho de la imagen base
+    wm_w, wm_h = wm_img.size
+    target_wm_w = int(base_img.width * 0.20)
+    aspect_ratio = wm_h / wm_w
+    target_wm_h = int(target_wm_w * aspect_ratio)
+    
+    wm_resized = wm_img.resize((target_wm_w, target_wm_h), Image.Resampling.LANCZOS)
 
-with col1:
-    posicion = st.selectbox(
-        "Ubicación del logo",
-        [
-            "Esquina Inferior Derecha",
-            "Esquina Inferior Izquierda",
-            "Esquina Superior Derecha",
-            "Esquina Superior Izquierda",
-            "Centro"
-        ]
-    )
+    # Ajustar opacidad
+    alpha = wm_resized.split()[3]
+    alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
+    wm_resized.putalpha(alpha)
 
-with col2:
-    estilo_color = st.selectbox(
-        "Color del Logo",
-        ["Blanco (Efecto Agua)", "Color Original"],
-        help="La opción 'Blanco' aísla el texto y el icono eliminando cualquier fondo sólido."
-    )
+    # Posicionamiento
+    margin = 20
+    if position == "Centro":
+        pos = ((base_img.width - target_wm_w) // 2, (base_img.height - target_wm_h) // 2)
+    elif position == "Inferior Derecha":
+        pos = (base_img.width - target_wm_w - margin, base_img.height - target_wm_h - margin)
+    elif position == "Inferior Izquierda":
+        pos = (margin, base_img.height - target_wm_h - margin)
+    elif position == "Superior Derecha":
+        pos = (base_img.width - target_wm_w - margin, margin)
+    else: # Superior Izquierda
+        pos = (margin, margin)
 
-with col3:
-    opacidad_pct = st.slider(
-        "Opacidad / Intensidad",
-        min_value=10,
-        max_value=100,
-        value=35,
-        step=5,
-        help="30-40% es perfecto para un acabado tenue y profesional."
-    )
+    transparent = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+    transparent.paste(base_img, (0, 0))
+    transparent.paste(wm_resized, pos, mask=wm_resized)
+    return transparent.convert("RGB")
 
-if uploaded_images and uploaded_logo:
-    if st.button(f"🚀 Procesar Lote ({len(uploaded_images)} fotos)"):
-        try:
-            # Cargar logo base en RGBA
-            logo_raw = Image.open(uploaded_logo).convert("RGBA")
+if uploaded_files:
+    st.info(f"📸 Total de fotos seleccionadas: **{len(uploaded_files)}**")
+    
+    if st.button("🚀 Procesar Lote Completo"):
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        zip_buffer = io.BytesIO()
+        
+        # Cargar logo si existe
+        loaded_wm = Image.open(watermark_file) if watermark_file else None
 
-            # --- TRATAMIENTO QUIRÚRGICO DE FONDO ---
-            bg_color = logo_raw.getpixel((0, 0))[:3]
-            datas = logo_raw.getdata()
-            new_pixels = []
-            alpha_factor = opacidad_pct / 100.0
-
-            for item in datas:
-                r, g, b = item[0], item[1], item[2]
-                orig_alpha = item[3] if len(item) > 3 else 255
+        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            for idx, file in enumerate(uploaded_files):
+                status_text.text(f"Procesando imagen {idx+1}/{len(uploaded_files)}: {file.name}")
                 
-                # Detectar si el píxel pertenece al fondo (basado en la esquina)
-                is_background = (
-                    abs(r - bg_color[0]) < 45 and 
-                    abs(g - bg_color[1]) < 45 and 
-                    abs(b - bg_color[2]) < 45
-                )
+                # Cargar imagen (Soporta HEIC, JPG, PNG)
+                img = Image.open(file)
+                img = ImageOps.exif_transpose(img) # Corregir orientación automatica
 
-                if is_background:
-                    new_pixels.append((255, 255, 255, 0))  # Fondo transparente
+                # 1. Filtro Inmobiliario (Mejora de luz y contraste)
+                if enable_enhancement:
+                    img = ImageEnhance.Brightness(img).enhance(brightness_factor)
+                    img = ImageEnhance.Contrast(img).enhance(contrast_factor)
+
+                # 2. Redimensionado manteniendo aspecto
+                img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+
+                # 3. Marca de agua
+                if loaded_wm:
+                    img = apply_watermark(img, loaded_wm, wm_position, wm_opacity)
                 else:
-                    if estilo_color == "Blanco (Efecto Agua)":
-                        alpha_val = int(255 * alpha_factor)
-                        new_pixels.append((255, 255, 255, alpha_val))
-                    else:
-                        alpha_val = int(orig_alpha * max(alpha_factor, 0.85))
-                        new_pixels.append((r, g, b, alpha_val))
+                    img = img.convert("RGB")
 
-            logo_raw.putdata(new_pixels)
-            logo_img = logo_raw
+                # 4. Renombrado SEO
+                clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
+                new_filename = f"{clean_seo_name}-{idx+1}.jpg"
 
-            zip_buffer = BytesIO()
+                # Guardar imagen procesada en memoria
+                out_buffer = io.BytesIO()
+                img.save(out_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+                
+                # Añadir al ZIP
+                zip_file.writestr(new_filename, out_buffer.getvalue())
 
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                st.markdown("---")
-                st.subheader("📸 Resultados procesados:")
+                # Actualizar barra de progreso
+                progress_bar.progress((idx + 1) / len(uploaded_files))
 
-                fotos_procesadas = 0
-
-                for idx, uploaded_file in enumerate(uploaded_images):
-                    try:
-                        base_img = Image.open(uploaded_file)
-                        base_img = ImageOps.exif_transpose(base_img).convert("RGB")
-
-                        target_width = 1500
-                        w_percent = (target_width / float(base_img.size[0]))
-                        target_height = int(float(base_img.size[1]) * float(w_percent))
-
-                        base_resized = base_img.resize(
-                            (target_width, target_height), Image.Resampling.LANCZOS
-                        )
-
-                        logo_target_width = int(target_width * 0.22)
-                        logo_percent = (logo_target_width / float(logo_img.size[0]))
-                        logo_target_height = int(float(logo_img.size[1]) * float(logo_percent))
-
-                        logo_resized = logo_img.resize(
-                            (logo_target_width, logo_target_height),
-                            Image.Resampling.LANCZOS
-                        )
-
-                        margin = 35
-                        img_w, img_h = base_resized.size
-                        logo_w, logo_h = logo_resized.size
-
-                        if posicion == "Esquina Inferior Derecha":
-                            pos_x = img_w - logo_w - margin
-                            pos_y = img_h - logo_h - margin
-                        elif posicion == "Esquina Inferior Izquierda":
-                            pos_x = margin
-                            pos_y = img_h - logo_h - margin
-                        elif posicion == "Esquina Superior Derecha":
-                            pos_x = img_w - logo_w - margin
-                            pos_y = margin
-                        elif posicion == "Esquina Superior Izquierda":
-                            pos_x = margin
-                            pos_y = margin
-                        else:
-                            pos_x = (img_w - logo_w) // 2
-                            pos_y = (img_h - logo_h) // 2
-
-                        base_resized.paste(logo_resized, (pos_x, pos_y), mask=logo_resized)
-
-                        img_buffer = BytesIO()
-                        base_resized.save(img_buffer, format="JPEG", quality=85, optimize=True)
-                        img_bytes = img_buffer.getvalue()
-
-                        out_filename = f"foto_optimizada_{idx+1}.jpg"
-                        zip_file.writestr(out_filename, img_bytes)
-
-                        size_kb = len(img_bytes) / 1024
-                        col_img, col_info = st.columns([2, 1])
-                        with col_img:
-                            st.image(img_bytes, caption=f"Foto {idx+1}: {out_filename}", use_container_width=True)
-                        with col_info:
-                            st.write(f"**Peso:** {size_kb:.1f} KB")
-                            st.write(f"**Dimensiones:** {target_width}x{target_height} px")
-                            st.download_button(
-                                label="📥 Descargar foto",
-                                data=img_bytes,
-                                file_name=out_filename,
-                                mime="image/jpeg",
-                                key=f"dl_{idx}"
-                            )
-
-                        fotos_procesadas += 1
-
-                    except Exception as e:
-                        st.error(f"❌ Error al procesar el archivo '{uploaded_file.name}'.")
-
-                zip_file.close()
-
-            if fotos_procesadas > 0:
-                zip_buffer.seek(0)
-                st.markdown("---")
-                st.success(f"✅ ¡Se han procesado las {fotos_procesadas} fotos correctamente!")
-
-                st.download_button(
-                    label="📦 Descargar TODO el Lote Optimizado (.ZIP)",
-                    data=zip_buffer.getvalue(),
-                    file_name="lote_fotos_inmueble_optimizadas.zip",
-                    mime="application/zip"
-                )
-
-        except Exception as general_error:
-            st.error("⚠️ Ocurrió un error al procesar el lote.")
+        status_text.success("✅ ¡Lote procesado con éxito!")
+        
+        # Botón de descarga del ZIP
+        st.download_button(
+            label="📥 Descargar todo en archivo ZIP",
+            data=zip_buffer.getvalue(),
+            file_name=f"lote-optimizado-{seo_prefix}.zip",
+            mime="application/zip"
+        )
