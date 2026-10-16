@@ -2,7 +2,7 @@ import io
 import os
 import zipfile
 import streamlit as st
-from PIL import Image, ImageEnhance, ImageOps, ImageOps as PILImageOps
+from PIL import Image, ImageEnhance, ImageOps
 import pillow_heif
 
 # Registrar el decodificador de HEIC/HEIF de iPhone
@@ -25,7 +25,7 @@ watermark_file = st.sidebar.file_uploader("Subir Logo (PNG transparente recomend
 wm_position = st.sidebar.selectbox("Posición del Logo", ["Centro", "Inferior Derecha", "Inferior Izquierda", "Superior Derecha", "Superior Izquierda"])
 wm_opacity = st.sidebar.slider("Opacidad del Logo (%)", 10, 100, 80)
 
-# NUEVA OPCIÓN: Color de la marca de agua
+# Opción: Color de la marca de agua
 wm_color_option = st.sidebar.selectbox("Color de la Marca de Agua", ["Original (Color del logo)", "Blanco"])
 
 # 2. Configuración SEO
@@ -44,21 +44,25 @@ max_width = st.sidebar.number_input("Ancho Máximo (px)", value=1920)
 max_height = st.sidebar.number_input("Alto Máximo (px)", value=1080)
 jpeg_quality = st.sidebar.slider("Calidad JPEG (%)", 50, 95, 82)
 
+# ZONA DE CARGA DE IMÁGENES (AQUÍ ESTABA EL ERROR, YA INCLUIDA)
+uploaded_files = st.file_uploader(
+    "Selecciona o arrastra las fotos del inmueble (soporta JPG, PNG, HEIC)",
+    type=["jpg", "jpeg", "png", "heic", "heif"],
+    accept_multiple_files=True
+)
+
 def apply_watermark(base_img, wm_img, position, opacity_pct, color_option):
     base_img = base_img.convert("RGBA")
     wm_img = wm_img.convert("RGBA")
 
     # Si se selecciona la opción "Blanco", convertimos las partes opacas del logo a blanco puro manteniendo la transparencia
     if color_option == "Blanco":
-        # Separar los canales
         r, g, b, alpha = wm_img.split()
-        # Crear una imagen blanca del mismo tamaño
         white_img = Image.new("RGBA", wm_img.size, (255, 255, 255, 255))
-        # Usar el canal alfa original como máscara para que solo quede blanco donde antes había dibujo
         white_img.putalpha(alpha)
         wm_img = white_img
 
-    # Escalar la marca de agua al tamaño óptimo/discreto (20% del ancho de la imagen base)
+    # Escalar la marca de agua al tamaño discreto y elegante (20% del ancho)
     wm_w, wm_h = wm_img.size
     target_wm_w = int(base_img.width * 0.20)
     aspect_ratio = wm_h / wm_w
@@ -115,7 +119,7 @@ if uploaded_files:
                 # 2. Redimensionado
                 img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
 
-                # 3. Marca de agua (con opción de color y tamaño original)
+                # 3. Marca de agua (con color original o blanco)
                 if loaded_wm:
                     img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
                 else:
