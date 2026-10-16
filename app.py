@@ -2,7 +2,7 @@ import io
 import os
 import zipfile
 import streamlit as st
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageEnhance, ImageOps, ImageOps as PILImageOps
 import pillow_heif
 
 # Registrar el decodificador de HEIC/HEIF de iPhone
@@ -25,6 +25,9 @@ watermark_file = st.sidebar.file_uploader("Subir Logo (PNG transparente recomend
 wm_position = st.sidebar.selectbox("Posición del Logo", ["Centro", "Inferior Derecha", "Inferior Izquierda", "Superior Derecha", "Superior Izquierda"])
 wm_opacity = st.sidebar.slider("Opacidad del Logo (%)", 10, 100, 80)
 
+# NUEVA OPCIÓN: Color de la marca de agua
+wm_color_option = st.sidebar.selectbox("Color de la Marca de Agua", ["Original (Color del logo)", "Blanco"])
+
 # 2. Configuración SEO
 st.sidebar.subheader("2. Renombrado SEO")
 seo_prefix = st.sidebar.text_input("Texto SEO (ej: piso-en-venta-madrid)", value="inmueble-oferta")
@@ -41,18 +44,21 @@ max_width = st.sidebar.number_input("Ancho Máximo (px)", value=1920)
 max_height = st.sidebar.number_input("Alto Máximo (px)", value=1080)
 jpeg_quality = st.sidebar.slider("Calidad JPEG (%)", 50, 95, 82)
 
-# Carga de imágenes principales
-uploaded_files = st.file_uploader(
-    "Selecciona o arrastra las fotos del inmueble (soporta JPG, PNG, HEIC)",
-    type=["jpg", "jpeg", "png", "heic", "heif"],
-    accept_multiple_files=True
-)
-
-def apply_watermark(base_img, wm_img, position, opacity_pct):
+def apply_watermark(base_img, wm_img, position, opacity_pct, color_option):
     base_img = base_img.convert("RGBA")
     wm_img = wm_img.convert("RGBA")
 
-    # Escalar la marca de agua a máximo 20% del ancho de la imagen base
+    # Si se selecciona la opción "Blanco", convertimos las partes opacas del logo a blanco puro manteniendo la transparencia
+    if color_option == "Blanco":
+        # Separar los canales
+        r, g, b, alpha = wm_img.split()
+        # Crear una imagen blanca del mismo tamaño
+        white_img = Image.new("RGBA", wm_img.size, (255, 255, 255, 255))
+        # Usar el canal alfa original como máscara para que solo quede blanco donde antes había dibujo
+        white_img.putalpha(alpha)
+        wm_img = white_img
+
+    # Escalar la marca de agua al tamaño óptimo/discreto (20% del ancho de la imagen base)
     wm_w, wm_h = wm_img.size
     target_wm_w = int(base_img.width * 0.20)
     aspect_ratio = wm_h / wm_w
@@ -65,8 +71,8 @@ def apply_watermark(base_img, wm_img, position, opacity_pct):
     alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
     wm_resized.putalpha(alpha)
 
-    # Posicionamiento
-    margin = 20
+    # Posicionamiento con márgenes
+    margin = int(base_img.width * 0.03)
     if position == "Centro":
         pos = ((base_img.width - target_wm_w) // 2, (base_img.height - target_wm_h) // 2)
     elif position == "Inferior Derecha":
@@ -91,8 +97,6 @@ if uploaded_files:
         status_text = st.empty()
         
         zip_buffer = io.BytesIO()
-        
-        # Cargar logo si existe
         loaded_wm = Image.open(watermark_file) if watermark_file else None
 
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
@@ -101,19 +105,19 @@ if uploaded_files:
                 
                 # Cargar imagen (Soporta HEIC, JPG, PNG)
                 img = Image.open(file)
-                img = ImageOps.exif_transpose(img) # Corregir orientación automatica
+                img = ImageOps.exif_transpose(img)
 
-                # 1. Filtro Inmobiliario (Mejora de luz y contraste)
+                # 1. Filtro Inmobiliario (Luz y Contraste)
                 if enable_enhancement:
                     img = ImageEnhance.Brightness(img).enhance(brightness_factor)
                     img = ImageEnhance.Contrast(img).enhance(contrast_factor)
 
-                # 2. Redimensionado manteniendo aspecto
+                # 2. Redimensionado
                 img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
 
-                # 3. Marca de agua
+                # 3. Marca de agua (con opción de color y tamaño original)
                 if loaded_wm:
-                    img = apply_watermark(img, loaded_wm, wm_position, wm_opacity)
+                    img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
                 else:
                     img = img.convert("RGB")
 
@@ -121,19 +125,15 @@ if uploaded_files:
                 clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
                 new_filename = f"{clean_seo_name}-{idx+1}.jpg"
 
-                # Guardar imagen procesada en memoria
+                # Guardar en buffer
                 out_buffer = io.BytesIO()
                 img.save(out_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
                 
-                # Añadir al ZIP
                 zip_file.writestr(new_filename, out_buffer.getvalue())
-
-                # Actualizar barra de progreso
                 progress_bar.progress((idx + 1) / len(uploaded_files))
 
         status_text.success("✅ ¡Lote procesado con éxito!")
         
-        # Botón de descarga del ZIP
         st.download_button(
             label="📥 Descargar todo en archivo ZIP",
             data=zip_buffer.getvalue(),
