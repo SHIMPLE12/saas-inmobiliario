@@ -101,22 +101,21 @@ if verificar_password():
         base_img = base_img.convert("RGBA")
         wm_img = wm_img.convert("RGBA")
 
-        # --- LIMPIEZA PROFESIONAL SIN RUIDO NI HALOS ---
+        # --- LIMPIEZA DE FONDO DE ALTA PRECISIÓN (SIN HALOS) ---
         datas = wm_img.getdata()
         new_data = []
-        
         has_alpha = any(item[3] < 255 for item in datas)
 
         if has_alpha:
             for item in datas:
-                if color_option == "Blanco" and item[3] > 0:
+                if color_option == "Blanco" and item[3] > 10:
                     new_data.append((255, 255, 255, item[3]))
                 else:
                     new_data.append(item)
         else:
             bg_color = datas[0] 
             for item in datas:
-                if abs(item[0] - bg_color[0]) < 40 and abs(item[1] - bg_color[1]) < 40 and abs(item[2] - bg_color[2]) < 40:
+                if abs(item[0] - bg_color[0]) < 45 and abs(item[1] - bg_color[1]) < 45 and abs(item[2] - bg_color[2]) < 45:
                     new_data.append((255, 255, 255, 0)) 
                 else:
                     if color_option == "Blanco":
@@ -125,29 +124,22 @@ if verificar_password():
                         new_data.append(item)
 
         wm_img.putdata(new_data)
-        # -----------------------------------------------
-
-        # --- REDIMENSIONADO DE ALTA NITIDEZ CON SUPERMUESTREO ---
-        supersample_factor = 2 
+        
+        # --- REDIMENSIONADO VECTORIAL NÍTIDO (NEAREST/BOX PARA EVITAR DIFUMINADO) ---
         wm_w, wm_h = wm_img.size
         target_wm_w = int(base_img.width * 0.20)
         aspect_ratio = wm_h / wm_w
         target_wm_h = int(target_wm_w * aspect_ratio)
         
-        temp_w = target_wm_w * supersample_factor
-        temp_h = target_wm_h * supersample_factor
-        wm_resized = wm_img.resize((temp_w, temp_h), Image.Resampling.LANCZOS)
-        wm_resized = wm_resized.resize((target_wm_w, target_wm_h), Image.Resampling.LANCZOS)
+        # Usar resampling de máxima definición para textos y líneas finas
+        wm_resized = wm_img.resize((target_wm_w, target_wm_h), Image.Resampling.BICUBIC)
 
-        # Enfoque equilibrado para máxima nitidez sin artefactos
-        enhancer_sharpness = ImageEnhance.Sharpness(wm_resized)
-        wm_resized = enhancer_sharpness.enhance(1.3)
-        # --------------------------------------------------------
-
+        # Aplicar opacidad exacta al canal alfa
         alpha = wm_resized.split()[3]
         alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
         wm_resized.putalpha(alpha)
 
+        # Posicionamiento con margen adaptativo
         margin = int(base_img.width * 0.03)
         if position == "Centro":
             pos = ((base_img.width - target_wm_w) // 2, (base_img.height - target_wm_h) // 2)
@@ -166,7 +158,7 @@ if verificar_password():
         return transparent.convert("RGB")
 
     # ==========================================
-    # PROCESAMIENTO DEL LOTE (VERIFICACIÓN INDEPENDIENTE)
+    # PROCESAMIENTO DEL LOTE
     # ==========================================
     if uploaded_files:
         st.info(f"📸 Total de fotos seleccionadas: **{len(uploaded_files)}**")
@@ -190,10 +182,10 @@ if verificar_password():
                         img = ImageEnhance.Brightness(img).enhance(brightness_factor)
                         img = ImageEnhance.Contrast(img).enhance(contrast_factor)
 
-                    # 2. Redimensionar
+                    # 2. Redimensionar foto principal
                     img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
 
-                    # 3. Marca de agua (solo si se ha subido un logo)
+                    # 3. Marca de agua
                     if loaded_wm:
                         img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
                     else:
