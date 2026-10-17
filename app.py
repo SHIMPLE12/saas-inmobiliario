@@ -1,3 +1,4 @@
+import gc
 import io
 import os
 import zipfile
@@ -104,11 +105,9 @@ if verificar_password():
         # --- ELIMINACIÓN DE FONDO SÓLIDO (RECTÁNGULO) Y OPCIÓN BLANCO ---
         datas = wm_img.getdata()
         new_data = []
-        # Tomamos el color de la esquina superior izquierda como referencia del fondo a remover
         bg_color = datas[0] 
         
         for item in datas:
-            # Si el píxel coincide con el color de fondo (tolerancia de color)
             if abs(item[0] - bg_color[0]) < 35 and abs(item[1] - bg_color[1]) < 35 and abs(item[2] - bg_color[2]) < 35:
                 new_data.append((255, 255, 255, 0)) # Transparente
             else:
@@ -161,36 +160,48 @@ if verificar_password():
             zip_buffer = io.BytesIO()
             loaded_wm = Image.open(watermark_file) if watermark_file else None
 
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for idx, file in enumerate(uploaded_files):
                     status_text.text(f"Procesando imagen {idx+1}/{len(uploaded_files)}: {file.name}")
                     
-                    img = Image.open(file)
-                    img = ImageOps.exif_transpose(img)
+                    # Cargar e interpretar rotación EXIF de fotos móvil
+                    with Image.open(file) as img:
+                        img = ImageOps.exif_transpose(img)
 
-                    # 1. Filtro de Realce
-                    if enable_enhancement:
-                        img = ImageEnhance.Brightness(img).enhance(brightness_factor)
-                        img = ImageEnhance.Contrast(img).enhance(contrast_factor)
+                        # REDIMENSIONAR PRIMERO (Reduce drásticamente el uso de memoria RAM)
+                        img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
 
-                    # 2. Redimensionar
-                    img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+                        # 1. Filtro de Realce (sobre la imagen ya reducida)
+                        if enable_enhancement:
+                            img = ImageEnhance.Brightness(img).enhance(brightness_factor)
+                            img = ImageEnhance.Contrast(img).enhance(contrast_factor)
 
-                    # 3. Marca de agua
-                    if loaded_wm:
-                        img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
-                    else:
-                        img = img.convert("RGB")
+                        # 2. Marca de agua
+                        if loaded_wm:
+                            img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
+                        else:
+                            img = img.convert("RGB")
 
-                    # 4. Nombre SEO
-                    clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
-                    new_filename = f"{clean_seo_name}-{idx+1}.jpg"
+                        # 3. Nombre SEO
+                        clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
+                        new_filename = f"{clean_seo_name}-{idx+1}.jpg"
 
-                    out_buffer = io.BytesIO()
-                    img.save(out_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
-                    
-                    zip_file.writestr(new_filename, out_buffer.getvalue())
+                        out_buffer = io.BytesIO()
+                        img.save(out_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+                        
+                        # Escribir bytes en el ZIP y liberar buffer de la foto actual
+                        zip_file.writestr(new_filename, out_buffer.getvalue())
+                        out_buffer.close()
+                        
+                        # Destruir referencias en memoria RAM y forzar recolector
+                        del img
+                        del out_buffer
+                        gc.collect()
+
                     progress_bar.progress((idx + 1) / len(uploaded_files))
+
+            if loaded_wm:
+                loaded_wm.close()
 
             status_text.success("✅ ¡Lote procesado con éxito!")
             
