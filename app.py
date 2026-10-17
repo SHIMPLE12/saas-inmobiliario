@@ -101,24 +101,35 @@ if verificar_password():
         base_img = base_img.convert("RGBA")
         wm_img = wm_img.convert("RGBA")
 
-        # --- ELIMINACIÓN DE FONDO SÓLIDO (RECTÁNGULO) Y OPCIÓN BLANCO ---
+        # --- LIMPIEZA PROFESIONAL SIN RUIDO NI HALOS ---
         datas = wm_img.getdata()
         new_data = []
-        # Tomamos el color de la esquina superior izquierda como referencia del fondo a remover
-        bg_color = datas[0] 
         
-        for item in datas:
-            # Si el píxel coincide con el color de fondo (tolerancia de color)
-            if abs(item[0] - bg_color[0]) < 35 and abs(item[1] - bg_color[1]) < 35 and abs(item[2] - bg_color[2]) < 35:
-                new_data.append((255, 255, 255, 0)) # Transparente
-            else:
-                if color_option == "Blanco":
+        # Detectar si la imagen cargada ya posee canal de transparencia real
+        has_alpha = any(item[3] < 255 for item in datas)
+
+        if has_alpha:
+            # Si el PNG ya es transparente de origen, no forzamos borrado para evitar ruido
+            for item in datas:
+                if color_option == "Blanco" and item[3] > 0:
                     new_data.append((255, 255, 255, item[3]))
                 else:
                     new_data.append(item)
-                    
+        else:
+            # Si tiene fondo sólido rectangular (ej: verde, blanco, etc.)
+            bg_color = datas[0] # Tomamos la esquina superior izquierda
+            for item in datas:
+                # Comprobación de tolerancia de color estricta para eliminar el fondo limpiamente
+                if abs(item[0] - bg_color[0]) < 40 and abs(item[1] - bg_color[1]) < 40 and abs(item[2] - bg_color[2]) < 40:
+                    new_data.append((255, 255, 255, 0)) # Transparente
+                else:
+                    if color_option == "Blanco":
+                        new_data.append((255, 255, 255, item[3]))
+                    else:
+                        new_data.append(item)
+
         wm_img.putdata(new_data)
-        # ---------------------------------------------------------------
+        # -----------------------------------------------
 
         # Escalar la marca de agua al 20% del ancho de la imagen principal
         wm_w, wm_h = wm_img.size
@@ -128,12 +139,12 @@ if verificar_password():
         
         wm_resized = wm_img.resize((target_wm_w, target_wm_h), Image.Resampling.LANCZOS)
 
-        # Aplicar opacidad
+        # Aplicar opacidad deseada
         alpha = wm_resized.split()[3]
         alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
         wm_resized.putalpha(alpha)
 
-        # Posicionamiento con margen
+        # Posicionamiento con margen adaptativo
         margin = int(base_img.width * 0.03)
         if position == "Centro":
             pos = ((base_img.width - target_wm_w) // 2, (base_img.height - target_wm_h) // 2)
