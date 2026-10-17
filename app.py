@@ -21,7 +21,7 @@ st.set_page_config(
 CLAVES_ACTIVAS = [
     "AgenciaSol-2026",    # Cliente 1
     "FincasGarcia-2026",  # Cliente 2
-    "gesnivalls-2026",  # Cliente 3
+    "gesnivalls-2026",    # Cliente 3
 ]
 
 def verificar_password():
@@ -101,12 +101,26 @@ if verificar_password():
         base_img = base_img.convert("RGBA")
         wm_img = wm_img.convert("RGBA")
 
-        if color_option == "Blanco":
-            r, g, b, alpha = wm_img.split()
-            white_img = Image.new("RGBA", wm_img.size, (255, 255, 255, 255))
-            white_img.putalpha(alpha)
-            wm_img = white_img
+        # --- ELIMINACIÓN DE FONDO SÓLIDO (RECTÁNGULO) Y OPCIÓN BLANCO ---
+        datas = wm_img.getdata()
+        new_data = []
+        # Tomamos el color de la esquina superior izquierda como referencia del fondo a remover
+        bg_color = datas[0] 
+        
+        for item in datas:
+            # Si el píxel coincide con el color de fondo (tolerancia de color)
+            if abs(item[0] - bg_color[0]) < 35 and abs(item[1] - bg_color[1]) < 35 and abs(item[2] - bg_color[2]) < 35:
+                new_data.append((255, 255, 255, 0)) # Transparente
+            else:
+                if color_option == "Blanco":
+                    new_data.append((255, 255, 255, item[3]))
+                else:
+                    new_data.append(item)
+                    
+        wm_img.putdata(new_data)
+        # ---------------------------------------------------------------
 
+        # Escalar la marca de agua al 20% del ancho de la imagen principal
         wm_w, wm_h = wm_img.size
         target_wm_w = int(base_img.width * 0.20)
         aspect_ratio = wm_h / wm_w
@@ -114,10 +128,12 @@ if verificar_password():
         
         wm_resized = wm_img.resize((target_wm_w, target_wm_h), Image.Resampling.LANCZOS)
 
+        # Aplicar opacidad
         alpha = wm_resized.split()[3]
         alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
         wm_resized.putalpha(alpha)
 
+        # Posicionamiento con margen
         margin = int(base_img.width * 0.03)
         if position == "Centro":
             pos = ((base_img.width - target_wm_w) // 2, (base_img.height - target_wm_h) // 2)
@@ -127,7 +143,7 @@ if verificar_password():
             pos = (margin, base_img.height - target_wm_h - margin)
         elif position == "Superior Derecha":
             pos = (base_img.width - target_wm_w - margin, margin)
-        else:
+        else: # Superior Izquierda
             pos = (margin, margin)
 
         transparent = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
@@ -152,17 +168,21 @@ if verificar_password():
                     img = Image.open(file)
                     img = ImageOps.exif_transpose(img)
 
+                    # 1. Filtro de Realce
                     if enable_enhancement:
                         img = ImageEnhance.Brightness(img).enhance(brightness_factor)
                         img = ImageEnhance.Contrast(img).enhance(contrast_factor)
 
+                    # 2. Redimensionar
                     img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
 
+                    # 3. Marca de agua
                     if loaded_wm:
                         img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
                     else:
                         img = img.convert("RGB")
 
+                    # 4. Nombre SEO
                     clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
                     new_filename = f"{clean_seo_name}-{idx+1}.jpg"
 
