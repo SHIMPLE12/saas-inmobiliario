@@ -1,3 +1,49 @@
+import streamlit as st
+
+# ==========================================
+# CLAVES INDIVIDUALES PARA CLIENTES ACTIVOS
+# ==========================================
+# Aquí vas añadiendo las claves de tus clientes que están al día de pago
+CLAVES_ACTIVAS = [
+    "AgenciaSol-2026",    # Cliente 1
+    "FincasGarcia-2026",  # Cliente 2
+]
+
+def verificar_password():
+    """Comprueba si la clave introducida está en la lista de clientes activos."""
+    def password_entered():
+        # Verificamos si la clave introducida coincide con alguna de las activas
+        if st.session_state["password_input"].strip() in CLAVES_ACTIVAS:
+            st.session_state["autenticado"] = True
+            st.session_state["error_pass"] = False
+        else:
+            st.session_state["autenticado"] = False
+            st.session_state["error_pass"] = True
+
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
+
+    if not st.session_state["autenticado"]:
+        st.subheader("🔐 Acceso Exclusivo a la Plataforma")
+        st.text_input(
+            "Introduce tu contraseña de cliente:",
+            type="password",
+            key="password_input",
+            on_change=password_entered
+        )
+        if st.session_state.get("error_pass", False):
+            st.error("❌ Contraseña no válida o suscripción inactiva.")
+        return False
+    else:
+        return True
+
+# Control de acceso a la app
+if verificar_password():
+    
+    # ==========================================
+    # AQUÍ CONTINÚA EL CÓDIGO NORMAL DE TU APP
+    # ==========================================
+    st.title("📸 Procesador Inmobiliario - Optimización de Imágenes")
 import io
 import os
 import zipfile
