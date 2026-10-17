@@ -21,6 +21,7 @@ st.set_page_config(
 CLAVES_ACTIVAS = [
     "AgenciaSol-2026",    # Cliente 1
     "FincasGarcia-2026",  # Cliente 2
+    "gesnivalls-2026",  # Cliente 3
 ]
 
 def verificar_password():
