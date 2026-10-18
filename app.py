@@ -1,4 +1,156 @@
-if uploaded_files:
+import gc
+import io
+import os
+import zipfile
+import streamlit as st
+from PIL import Image, ImageEnhance, ImageOps
+import pillow_heif
+
+# Registrar el decodificador de HEIC/HEIF de iPhone
+pillow_heif.register_heif_opener()
+
+# 1. LA CONFIGURACIÓN DE PÁGINA DEBE SER SIEMPRE LA PRIMERA INSTRUCCIÓN
+st.set_page_config(
+    page_title="SaaS Inmobiliario - Optimización de Imágenes",
+    page_icon="🏠",
+    layout="wide"
+)
+
+# ==========================================
+# CLAVES INDIVIDUALES PARA CLIENTES ACTIVOS
+# ==========================================
+CLAVES_ACTIVAS = [
+    "AgenciaSol-2026",    # Cliente 1
+    "FincasGarcia-2026",  # Cliente 2
+    "gesnivalls-2026",    # Cliente 3
+]
+
+def verificar_password():
+    """Comprueba si la clave introducida está en la lista de clientes activos."""
+    def password_entered():
+        if st.session_state["password_input"].strip() in CLAVES_ACTIVAS:
+            st.session_state["autenticado"] = True
+            st.session_state["error_pass"] = False
+        else:
+            st.session_state["autenticado"] = False
+            st.session_state["error_pass"] = True
+
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
+
+    if not st.session_state["autenticado"]:
+        st.subheader("🔐 Acceso Exclusivo a la Plataforma")
+        st.text_input(
+            "Introduce tu contraseña de cliente:",
+            type="password",
+            key="password_input",
+            on_change=password_entered
+        )
+        if st.session_state.get("error_pass", False):
+            st.error("❌ Contraseña no válida o suscripción inactiva.")
+        return False
+    else:
+        return True
+
+# ==========================================
+# CONTROL DE ACCESO
+# ==========================================
+if verificar_password():
+
+    # ------------------------------------------
+    # A PARTIR DE AQUÍ SOLO SE MUESTRA SI HA INTRODUCIDO LA CONTRASEÑA CORRECTA
+    # ------------------------------------------
+
+    st.title("🏠 Procesador Profesional de Imágenes Inmobiliarias")
+    st.write("Sube tus lotes de fotos para redimensionar, mejorar luz, renombrar para SEO y colocar tu logo en segundos.")
+
+    st.sidebar.header("⚙️ Configuración del Lote")
+
+    # 1. Configuración de Marca de Agua
+    st.sidebar.subheader("1. Marca de Agua / Logo")
+    watermark_file = st.sidebar.file_uploader("Subir Logo (PNG transparente recomendado)", type=["png", "jpg", "jpeg"])
+    wm_position = st.sidebar.selectbox("Posición del Logo", ["Centro", "Inferior Derecha", "Inferior Izquierda", "Superior Derecha", "Superior Izquierda"])
+    wm_opacity = st.sidebar.slider("Opacidad del Logo (%)", 10, 100, 80)
+
+    # Opción: Color de la marca de agua
+    wm_color_option = st.sidebar.selectbox("Color de la Marca de Agua", ["Original (Color del logo)", "Blanco"])
+
+    # 2. Configuración SEO
+    st.sidebar.subheader("2. Renombrado SEO")
+    seo_prefix = st.sidebar.text_input("Texto SEO (ej: piso-en-venta-madrid)", value="inmueble-oferta")
+
+    # 3. Mejora de Luz / Filtro Inmobiliario
+    st.sidebar.subheader("3. Realce de Luz y Color")
+    enable_enhancement = st.sidebar.checkbox("Activar Filtro Inmobiliario (Brillo/Luz)", value=True)
+    brightness_factor = st.sidebar.slider("Brillo / Luz", 0.8, 1.8, 1.25)
+    contrast_factor = st.sidebar.slider("Contraste", 0.8, 1.5, 1.1)
+
+    # 4. Redimensionado y Calidad
+    st.sidebar.subheader("4. Tamaño y Calidad")
+    max_width = st.sidebar.number_input("Ancho Máximo (px)", value=1920)
+    max_height = st.sidebar.number_input("Alto Máximo (px)", value=1080)
+    jpeg_quality = st.sidebar.slider("Calidad JPEG (%)", 50, 95, 82)
+
+    # ZONA DE CARGA DE IMÁGENES
+    uploaded_files = st.file_uploader(
+        "Selecciona o arrastra las fotos del inmueble (soporta JPG, PNG, HEIC)",
+        type=["jpg", "jpeg", "png", "heic", "heif"],
+        accept_multiple_files=True
+    )
+
+    def apply_watermark(base_img, wm_img, position, opacity_pct, color_option):
+        base_img = base_img.convert("RGBA")
+        wm_img = wm_img.convert("RGBA")
+
+        # --- ELIMINACIÓN DE FONDO SÓLIDO (RECTÁNGULO) Y OPCIÓN BLANCO ---
+        datas = wm_img.getdata()
+        new_data = []
+        bg_color = datas[0] 
+        
+        for item in datas:
+            if abs(item[0] - bg_color[0]) < 35 and abs(item[1] - bg_color[1]) < 35 and abs(item[2] - bg_color[2]) < 35:
+                new_data.append((255, 255, 255, 0)) # Transparente
+            else:
+                if color_option == "Blanco":
+                    new_data.append((255, 255, 255, item[3]))
+                else:
+                    new_data.append(item)
+                    
+        wm_img.putdata(new_data)
+        # ---------------------------------------------------------------
+
+        # Escalar la marca de agua al 20% del ancho de la imagen principal
+        wm_w, wm_h = wm_img.size
+        target_wm_w = int(base_img.width * 0.20)
+        aspect_ratio = wm_h / wm_w
+        target_wm_h = int(target_wm_w * aspect_ratio)
+        
+        wm_resized = wm_img.resize((target_wm_w, target_wm_h), Image.Resampling.LANCZOS)
+
+        # Aplicar opacidad
+        alpha = wm_resized.split()[3]
+        alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
+        wm_resized.putalpha(alpha)
+
+        # Posicionamiento con margen
+        margin = int(base_img.width * 0.03)
+        if position == "Centro":
+            pos = ((base_img.width - target_wm_w) // 2, (base_img.height - target_wm_h) // 2)
+        elif position == "Inferior Derecha":
+            pos = (base_img.width - target_wm_w - margin, base_img.height - target_wm_h - margin)
+        elif position == "Inferior Izquierda":
+            pos = (margin, base_img.height - target_wm_h - margin)
+        elif position == "Superior Derecha":
+            pos = (base_img.width - target_wm_w - margin, margin)
+        else: # Superior Izquierda
+            pos = (margin, margin)
+
+        transparent = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+        transparent.paste(base_img, (0, 0))
+        transparent.paste(wm_resized, pos, mask=wm_resized)
+        return transparent.convert("RGB")
+
+    if uploaded_files:
         st.info(f"📸 Total de fotos seleccionadas: **{len(uploaded_files)}**")
         
         if st.button("🚀 Procesar Lote Completo"):
@@ -9,44 +161,42 @@ if uploaded_files:
             loaded_wm = Image.open(watermark_file) if watermark_file else None
 
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    status_text.text(f"Procesando imagen {idx+1}/{len(uploaded_files)}: {uploaded_file.name}")
+                for idx, file in enumerate(uploaded_files):
+                    status_text.text(f"Procesando imagen {idx+1}/{len(uploaded_files)}: {file.name}")
                     
-                    try:
-                        # Abrir directamente desde el buffer del archivo subido
-                        uploaded_file.seek(0)
-                        with Image.open(uploaded_file) as img:
-                            img = ImageOps.exif_transpose(img)
+                    # Cargar e interpretar rotación EXIF de fotos móvil
+                    with Image.open(file) as img:
+                        img = ImageOps.exif_transpose(img)
+
+                        # REDIMENSIONAR PRIMERO (Reduce drásticamente el uso de memoria RAM)
+                        img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+
+                        # 1. Filtro de Realce (sobre la imagen ya reducida)
+                        if enable_enhancement:
+                            img = ImageEnhance.Brightness(img).enhance(brightness_factor)
+                            img = ImageEnhance.Contrast(img).enhance(contrast_factor)
+
+                        # 2. Marca de agua
+                        if loaded_wm:
+                            img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
+                        else:
                             img = img.convert("RGB")
 
-                            # Redimensionar de inmediato para minimizar el consumo de memoria
-                            img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+                        # 3. Nombre SEO
+                        clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
+                        new_filename = f"{clean_seo_name}-{idx+1}.jpg"
 
-                            # 1. Filtro de Realce
-                            if enable_enhancement:
-                                img = ImageEnhance.Brightness(img).enhance(brightness_factor)
-                                img = ImageEnhance.Contrast(img).enhance(contrast_factor)
-
-                            # 2. Marca de agua
-                            if loaded_wm:
-                                img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
-
-                            # 3. Nombre SEO
-                            clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
-                            new_filename = f"{clean_seo_name}-{idx+1}.jpg"
-
-                            # Guardar directamente a bytes comprimidos
-                            out_buffer = io.BytesIO()
-                            img.save(out_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
-                            
-                            zip_file.writestr(new_filename, out_buffer.getvalue())
-                            out_buffer.close()
-                            
-                            del img
-                            gc.collect()
-
-                    except Exception as e:
-                        st.error(f"Error procesando {uploaded_file.name}: {e}")
+                        out_buffer = io.BytesIO()
+                        img.save(out_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+                        
+                        # Escribir bytes en el ZIP y liberar buffer de la foto actual
+                        zip_file.writestr(new_filename, out_buffer.getvalue())
+                        out_buffer.close()
+                        
+                        # Destruir referencias en memoria RAM y forzar recolector
+                        del img
+                        del out_buffer
+                        gc.collect()
 
                     progress_bar.progress((idx + 1) / len(uploaded_files))
 
