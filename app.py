@@ -5,7 +5,6 @@ import zipfile
 import streamlit as st
 from PIL import Image, ImageEnhance, ImageOps
 import pillow_heif
-import extra_streamlit_components as stx
 
 # Registrar el decodificador de HEIC/HEIF de iPhone
 pillow_heif.register_heif_opener()
@@ -17,9 +16,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Inicializar gestor de almacenamiento local del navegador
-local_storage = stx.LocalStorage()
-
 # ==========================================
 # CONFIGURACIÓN DE ACCESO Y PLANES
 # ==========================================
@@ -29,17 +25,9 @@ CLAVES_ACTIVAS = [
     "gesnivalls-2026",    # Gesinvallès (Cliente de pago 3)
 ]
 
-# Obtener o inicializar las fotos restantes desde el navegador
-stored_fotos = local_storage.get(val="fotos_gratis_restantes")
-
-if stored_fotos is None:
-    fotos_restantes = 10
-    local_storage.set(val="fotos_gratis_restantes", key="10")
-else:
-    try:
-        fotos_restantes = int(stored_fotos)
-    except:
-        fotos_restantes = 10
+# Inicializar contador de fotos de prueba gratuitas (10 fotos en total)
+if "fotos_gratis_disponibles" not in st.session_state:
+    st.session_state["fotos_gratis_disponibles"] = 10
 
 st.title("🏠 Procesador Profesional de Imágenes Inmobiliarias")
 st.write("Sube tus lotes de fotos para redimensionar, mejorar luz, renombrar para SEO y colocar tu logo en segundos.")
@@ -84,7 +72,7 @@ jpeg_quality = st.sidebar.slider("Calidad JPEG (%)", 50, 95, 82)
 
 # ZONA DE CARGA DE IMÁGENES
 if not es_cliente_pagando:
-    mensaje_carga = f"Selecciona fotos (Prueba gratuita: Te quedan {fotos_restantes} fotos)"
+    mensaje_carga = f"Selecciona fotos (Prueba gratuita: Te quedan {st.session_state['fotos_gratis_disponibles']} fotos)"
 else:
     mensaje_carga = "Selecciona o arrastra las fotos del inmueble (Lotes ilimitados)"
 
@@ -143,14 +131,14 @@ def apply_watermark(base_img, wm_img, position, opacity_pct, color_option):
 
 if uploaded_files:
     if not es_cliente_pagando:
-        if fotos_restantes <= 0:
-            st.error("❌ Has agotado tus 10 fotos gratuitas de prueba en este dispositivo.")
+        if st.session_state["fotos_gratis_disponibles"] <= 0:
+            st.error("❌ Has agotado tus 10 fotos gratuitas de prueba.")
             st.info("💡 **¿Quieres procesar sin límites?** Introduce tu contraseña de cliente en la barra lateral o adquiere la suscripción profesional en Gumroad:")
             st.link_button("💳 Contratar Suscripción Profesional (22,99 €/mes)", "https://ganpan.gumroad.com/l/idbat")
             st.stop()
         
-        if len(uploaded_files) > fotos_restantes:
-            st.warning(f"⚠️ Has seleccionado **{len(uploaded_files)} fotos**, pero solo te quedan **{fotos_restantes} fotos gratuitas** disponibles.")
+        if len(uploaded_files) > st.session_state["fotos_gratis_disponibles"]:
+            st.warning(f"⚠️ Has seleccionado **{len(uploaded_files)} fotos**, pero solo te quedan **{st.session_state['fotos_gratis_disponibles']} fotos gratuitas** disponibles.")
             st.info("💡 Reduce el número de fotos o adquiere acceso ilimitado:")
             st.link_button("💳 Contratar Suscripción Profesional (22,99 €/mes)", "https://ganpan.gumroad.com/l/idbat")
             st.stop()
@@ -208,9 +196,9 @@ if uploaded_files:
         if loaded_wm:
             loaded_wm.close()
 
+        # Descontar las fotos procesadas del saldo gratuito si no es cliente de pago
         if not es_cliente_pagando:
-            nuevas_restantes = max(0, fotos_restantes - len(uploaded_files))
-            local_storage.set(val="fotos_gratis_restantes", key=str(nuevas_restantes))
+            st.session_state["fotos_gratis_disponibles"] -= len(uploaded_files)
 
         status_text.success("✅ ¡Lote procesado con éxito!")
         
