@@ -185,7 +185,7 @@ if uploaded_files:
                 progress_bar.progress((idx + 1) / len(uploaded_files))
 
         if loaded_wm:
-            loaded_wm.close()
+                    loaded_wm.close()
 
         if not es_cliente_pagando:
             st.session_state["fotos_gratis_disponibles"] -= len(uploaded_files)
