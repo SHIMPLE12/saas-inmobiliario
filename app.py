@@ -86,27 +86,18 @@ def apply_watermark(base_img, wm_img, position, opacity_pct, color_option):
     base_img = base_img.convert("RGBA")
     wm_img = wm_img.convert("RGBA")
 
-    datas = wm_img.getdata()
-    new_data = []
-    bg_color = datas[0] 
-    
-    for item in datas:
-        if abs(item[0] - bg_color[0]) < 35 and abs(item[1] - bg_color[1]) < 35 and abs(item[2] - bg_color[2]) < 35:
-            new_data.append((255, 255, 255, 0))
-        else:
-            if color_option == "Blanco":
-                new_data.append((255, 255, 255, item[3]))
-            else:
-                new_data.append(item)
-                
-    wm_img.putdata(new_data)
-
     wm_w, wm_h = wm_img.size
     target_wm_w = int(base_img.width * 0.20)
     aspect_ratio = wm_h / wm_w
     target_wm_h = int(target_wm_w * aspect_ratio)
     
     wm_resized = wm_img.resize((target_wm_w, target_wm_h), Image.Resampling.LANCZOS)
+
+    if color_option == "Blanco":
+        r, g, b, alpha_channel = wm_resized.split()
+        wm_white = Image.new("RGBA", wm_resized.size, (255, 255, 255, 255))
+        wm_white.putalpha(alpha_channel)
+        wm_resized = wm_white
 
     alpha = wm_resized.split()[3]
     alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
@@ -196,7 +187,6 @@ if uploaded_files:
         if loaded_wm:
             loaded_wm.close()
 
-        # Descontar las fotos procesadas del saldo gratuito si no es cliente de pago
         if not es_cliente_pagando:
             st.session_state["fotos_gratis_disponibles"] -= len(uploaded_files)
 
