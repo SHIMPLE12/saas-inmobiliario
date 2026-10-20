@@ -18,8 +18,6 @@ st.set_page_config(
 )
 
 # Inicializar gestor de almacenamiento local del navegador
-stx_val = stx.CookieManager() # O usamos el LocalStorage de la librería
-# Usaremos stx.LocalStorage para guardar las fotos restantes en el navegador
 local_storage = stx.LocalStorage()
 
 # ==========================================
@@ -35,7 +33,6 @@ CLAVES_ACTIVAS = [
 stored_fotos = local_storage.get(val="fotos_gratis_restantes")
 
 if stored_fotos is None:
-    # Si es la primera vez que entra, le asignamos 10 y lo guardamos en su navegador
     fotos_restantes = 10
     local_storage.set(val="fotos_gratis_restantes", key="10")
 else:
@@ -211,7 +208,6 @@ if uploaded_files:
         if loaded_wm:
             loaded_wm.close()
 
-        # Actualizar saldo en el navegador si no es cliente de pago
         if not es_cliente_pagando:
             nuevas_restantes = max(0, fotos_restantes - len(uploaded_files))
             local_storage.set(val="fotos_gratis_restantes", key=str(nuevas_restantes))
