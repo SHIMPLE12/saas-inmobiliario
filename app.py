@@ -5,6 +5,7 @@ import zipfile
 import streamlit as st
 from PIL import Image, ImageEnhance, ImageOps
 import pillow_heif
+import extra_streamlit_components as stx
 
 # Registrar el decodificador de HEIC/HEIF de iPhone
 pillow_heif.register_heif_opener()
@@ -16,6 +17,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# Inicializar gestor de almacenamiento local del navegador
+stx_val = stx.CookieManager() # O usamos el LocalStorage de la librería
+# Usaremos stx.LocalStorage para guardar las fotos restantes en el navegador
+local_storage = stx.LocalStorage()
+
 # ==========================================
 # CONFIGURACIÓN DE ACCESO Y PLANES
 # ==========================================
@@ -25,7 +31,18 @@ CLAVES_ACTIVAS = [
     "gesnivalls-2026",    # Gesinvallès (Cliente de pago 3)
 ]
 
-LIMITE_PRUEBA_GRATIS = 10  # Fotos máximas para usuarios en prueba gratuita
+# Obtener o inicializar las fotos restantes desde el navegador
+stored_fotos = local_storage.get(val="fotos_gratis_restantes")
+
+if stored_fotos is None:
+    # Si es la primera vez que entra, le asignamos 10 y lo guardamos en su navegador
+    fotos_restantes = 10
+    local_storage.set(val="fotos_gratis_restantes", key="10")
+else:
+    try:
+        fotos_restantes = int(stored_fotos)
+    except:
+        fotos_restantes = 10
 
 st.title("🏠 Procesador Profesional de Imágenes Inmobiliarias")
 st.write("Sube tus lotes de fotos para redimensionar, mejorar luz, renombrar para SEO y colocar tu logo en segundos.")
@@ -69,7 +86,11 @@ max_height = st.sidebar.number_input("Alto Máximo (px)", value=1080)
 jpeg_quality = st.sidebar.slider("Calidad JPEG (%)", 50, 95, 82)
 
 # ZONA DE CARGA DE IMÁGENES
-mensaje_carga = "Selecciona o arrastra las fotos (Modo prueba: Máx 10 fotos)" if not es_cliente_pagando else "Selecciona o arrastra las fotos del inmueble (Lotes ilimitados)"
+if not es_cliente_pagando:
+    mensaje_carga = f"Selecciona fotos (Prueba gratuita: Te quedan {fotos_restantes} fotos)"
+else:
+    mensaje_carga = "Selecciona o arrastra las fotos del inmueble (Lotes ilimitados)"
+
 uploaded_files = st.file_uploader(
     mensaje_carga,
     type=["jpg", "jpeg", "png", "heic", "heif"],
@@ -86,4 +107,128 @@ def apply_watermark(base_img, wm_img, position, opacity_pct, color_option):
     
     for item in datas:
         if abs(item[0] - bg_color[0]) < 35 and abs(item[1] - bg_color[1]) < 35 and abs(item[2] - bg_color[2]) < 35:
-            new_data.append((255, 255
+            new_data.append((255, 255, 255, 0))
+        else:
+            if color_option == "Blanco":
+                new_data.append((255, 255, 255, item[3]))
+            else:
+                new_data.append(item)
+                
+    wm_img.putdata(new_data)
+
+    wm_w, wm_h = wm_img.size
+    target_wm_w = int(base_img.width * 0.20)
+    aspect_ratio = wm_h / wm_w
+    target_wm_h = int(target_wm_w * aspect_ratio)
+    
+    wm_resized = wm_img.resize((target_wm_w, target_wm_h), Image.Resampling.LANCZOS)
+
+    alpha = wm_resized.split()[3]
+    alpha = ImageEnhance.Brightness(alpha).enhance(opacity_pct / 100.0)
+    wm_resized.putalpha(alpha)
+
+    margin = int(base_img.width * 0.03)
+    if position == "Centro":
+        pos = ((base_img.width - target_wm_w) // 2, (base_img.height - target_wm_h) // 2)
+    elif position == "Inferior Derecha":
+        pos = (base_img.width - target_wm_w - margin, base_img.height - target_wm_h - margin)
+    elif position == "Inferior Izquierda":
+        pos = (margin, base_img.height - target_wm_h - margin)
+    elif position == "Superior Derecha":
+        pos = (base_img.width - target_wm_w - margin, margin)
+    else:
+        pos = (margin, margin)
+
+    transparent = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+    transparent.paste(base_img, (0, 0))
+    transparent.paste(wm_resized, pos, mask=wm_resized)
+    return transparent.convert("RGB")
+
+if uploaded_files:
+    if not es_cliente_pagando:
+        if fotos_restantes <= 0:
+            st.error("❌ Has agotado tus 10 fotos gratuitas de prueba en este dispositivo.")
+            st.info("💡 **¿Quieres procesar sin límites?** Introduce tu contraseña de cliente en la barra lateral o adquiere la suscripción profesional en Gumroad:")
+            st.link_button("💳 Contratar Suscripción Profesional (22,99 €/mes)", "https://ganpan.gumroad.com/l/idbat")
+            st.stop()
+        
+        if len(uploaded_files) > fotos_restantes:
+            st.warning(f"⚠️ Has seleccionado **{len(uploaded_files)} fotos**, pero solo te quedan **{fotos_restantes} fotos gratuitas** disponibles.")
+            st.info("💡 Reduce el número de fotos o adquiere acceso ilimitado:")
+            st.link_button("💳 Contratar Suscripción Profesional (22,99 €/mes)", "https://ganpan.gumroad.com/l/idbat")
+            st.stop()
+
+    st.info(f"📸 Total de fotos seleccionadas: **{len(uploaded_files)}**")
+    
+    if st.button("🚀 Procesar Lote Completo"):
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        loaded_wm = Image.open(watermark_file) if watermark_file else None
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip_file:
+            tmp_zip_path = tmp_zip_file.name
+
+        with zipfile.ZipFile(tmp_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for idx, file in enumerate(uploaded_files):
+                status_text.text(f"Procesando imagen {idx+1}/{len(uploaded_files)}: {file.name}")
+                
+                try:
+                    file.seek(0)
+                    with Image.open(file) as img:
+                        img = ImageOps.exif_transpose(img)
+                        img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+
+                        if enable_enhancement:
+                            img = ImageEnhance.Brightness(img).enhance(brightness_factor)
+                            img = ImageEnhance.Contrast(img).enhance(contrast_factor)
+
+                        if loaded_wm:
+                            img = apply_watermark(img, loaded_wm, wm_position, wm_opacity, wm_color_option)
+                        
+                        if img.mode != "RGB":
+                            img = img.convert("RGB")
+
+                        clean_seo_name = seo_prefix.strip().replace(" ", "-").lower()
+                        new_filename = f"{clean_seo_name}-{idx+1}.jpg"
+
+                        out_buffer = io.BytesIO()
+                        img.save(out_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+                        
+                        zip_file.writestr(new_filename, out_buffer.getvalue())
+                        
+                        out_buffer.close()
+                        del out_buffer
+                        del img
+                        gc.collect()
+
+                except Exception as e:
+                    st.error(f"Error procesando {file.name}: {e}")
+
+                progress_bar.progress((idx + 1) / len(uploaded_files))
+
+        if loaded_wm:
+            loaded_wm.close()
+
+        # Actualizar saldo en el navegador si no es cliente de pago
+        if not es_cliente_pagando:
+            nuevas_restantes = max(0, fotos_restantes - len(uploaded_files))
+            local_storage.set(val="fotos_gratis_restantes", key=str(nuevas_restantes))
+
+        status_text.success("✅ ¡Lote procesado con éxito!")
+        
+        with open(tmp_zip_path, "rb") as f:
+            zip_bytes = f.read()
+
+        st.download_button(
+            label="📥 Descargar todo en archivo ZIP",
+            data=zip_bytes,
+            file_name=f"lote-optimizado-{seo_prefix}.zip",
+            mime="application/zip"
+        )
+
+        try:
+            os.remove(tmp_zip_path)
+        except Exception:
+            pass
