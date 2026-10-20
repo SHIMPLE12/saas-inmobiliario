@@ -1,3 +1,4 @@
 streamlit
-Pillow
+pillow
 pillow-heif
+extra-streamlit-components
